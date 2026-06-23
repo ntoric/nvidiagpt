@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
-  MessageSquare, Plus, Trash2, Send, Menu, X, Bot, User, Copy, Check, Search, Sun, Moon
+  MessageSquare, Plus, Trash2, Send, Menu, X, User, Copy, Check, Search, Sun, Moon, Square, Zap
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -10,6 +10,19 @@ import {
   deleteConversation, sendMessageStream, getModels
 } from './api'
 
+const PURPOSE_RECOMMENDATIONS = [
+  { purpose: 'General Chat',       model: 'meta/llama-4-maverick-17b-128e-instruct' },
+  { purpose: 'Coding',             model: 'qwen/qwen2.5-coder-32b-instruct' },
+  { purpose: 'Reasoning',          model: 'deepseek-ai/deepseek-r1' },
+  { purpose: 'Agentic workflows',  model: 'moonshotai/kimi-k2-instruct' },
+  { purpose: 'Large context',      model: 'nvidia/nemotron-3-ultra-550b-a55b' },
+  { purpose: 'Fast & lightweight', model: 'google/gemma-3-12b-it' },
+  { purpose: 'Vision',             model: 'meta/llama-3.2-90b-vision-instruct' },
+  { purpose: 'RAG',                model: 'nvidia/nemotron-mini-4b-instruct' },
+  { purpose: 'OCR',                model: 'nvidia/nemotron-ocr-v1' },
+  { purpose: 'Translation',        model: 'nvidia/riva-translate-4b-instruct-v1.1' },
+]
+
 export default function App() {
   const [conversations, setConversations] = useState([])
   const [activeConv, setActiveConv] = useState(null)
@@ -18,10 +31,12 @@ export default function App() {
   const [streaming, setStreaming] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [loadingConv, setLoadingConv] = useState(false)
-  const [models, setModels] = useState([])
+  const [modelCategories, setModelCategories] = useState([])
   const [selectedModel, setSelectedModel] = useState('')
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
+  const [selectedPurpose, setSelectedPurpose] = useState('')
+  const [purposeDropdownOpen, setPurposeDropdownOpen] = useState(false)
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('theme')
     if (saved) return saved
@@ -29,6 +44,7 @@ export default function App() {
   })
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const abortControllerRef = useRef(null)
 
   useEffect(() => {
     const root = document.documentElement
@@ -66,13 +82,28 @@ export default function App() {
 
   const loadModels = async () => {
     try {
-      const modelList = await getModels()
-      setModels(modelList)
-      if (modelList.length > 0) setSelectedModel(modelList[0])
+      const categories = await getModels()
+      setModelCategories(categories)
+      const first = PURPOSE_RECOMMENDATIONS[0]
+      if (first) {
+        setSelectedPurpose(first.purpose)
+        setSelectedModel(first.model)
+      }
     } catch (err) {
       console.error('Failed to load models:', err)
     }
   }
+
+  const handleSelectPurpose = (purposeName) => {
+    setSelectedPurpose(purposeName)
+    setPurposeDropdownOpen(false)
+    const rec = PURPOSE_RECOMMENDATIONS.find(r => r.purpose === purposeName)
+    if (rec) {
+      setSelectedModel(rec.model)
+    }
+  }
+
+  const recommendedModel = PURPOSE_RECOMMENDATIONS.find(r => r.purpose === selectedPurpose)?.model
 
   const handleNewChat = async () => {
     try {
@@ -137,6 +168,9 @@ export default function App() {
     setInput('')
     setStreaming(true)
 
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     await sendMessageStream(
       convId,
       input,
@@ -153,6 +187,7 @@ export default function App() {
       },
       () => {
         setStreaming(false)
+        abortControllerRef.current = null
         loadConversations()
       },
       (error) => {
@@ -165,8 +200,16 @@ export default function App() {
           return updated
         })
         setStreaming(false)
-      }
+        abortControllerRef.current = null
+      },
+      controller.signal
     )
+  }
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
   }
 
   const handleKeyDown = (e) => {
@@ -177,7 +220,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
       {/* Sidebar */}
       {sidebarOpen && (
         <div className="w-72 flex flex-col" style={{ backgroundColor: 'var(--bg-sidebar)', borderRight: '1px solid var(--border-primary)' }}>
@@ -224,9 +267,8 @@ export default function App() {
           </div>
 
           <div className="p-3" style={{ borderTop: '1px solid var(--border-primary)' }}>
-            <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-              <Bot size={16} />
-              <span>NvidiaGPT</span>
+            <div className="flex items-center gap-2">
+              <img src="/logo_short.png" alt="ntoricGPT" className="h-6 w-auto" />
             </div>
           </div>
         </div>
@@ -245,7 +287,7 @@ export default function App() {
             {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
           <h1 className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-            {activeConv?.title || 'NvidiaGPT'}
+            {activeConv?.title || 'ntoricGPT'}
           </h1>
           <div className="flex items-center gap-2">
             <button
@@ -265,7 +307,7 @@ export default function App() {
                 onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
                 onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
               >
-                <Bot size={14} className="text-[#76b900]" />
+                <img src="/logo_short.png" alt="" className="h-4 w-auto" />
                 <span className="max-w-[160px] truncate">{selectedModel || 'Select model'}</span>
               </button>
               {modelDropdownOpen && (
@@ -283,41 +325,76 @@ export default function App() {
                         onChange={e => setModelSearch(e.target.value)}
                         placeholder="Search models..."
                         autoFocus
-                        className="w-full rounded-md pl-7 pr-3 py-2 text-xs outline-none focus:ring-1 focus:ring-[#76b900]"
+                        className="w-full rounded-md pl-7 pr-3 py-2 text-xs outline-none focus:ring-1 focus:ring-[#0d9488]"
                         style={{ backgroundColor: 'var(--bg-dropdown-input)', color: 'var(--text-primary)' }}
                       />
                     </div>
                     <div className="max-h-64 overflow-y-auto">
-                      {models.filter(m =>
-                        m.toLowerCase().includes(modelSearch.toLowerCase())
-                      ).length === 0 ? (
-                        <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>No models found</p>
-                      ) : (
-                        models
-                          .filter(m => m.toLowerCase().includes(modelSearch.toLowerCase()))
-                          .map(model => (
-                            <button
-                              key={model}
-                              onClick={() => {
-                                setSelectedModel(model)
-                                setModelDropdownOpen(false)
-                                setModelSearch('')
-                              }}
-                              className="w-full text-left px-3 py-2.5 text-xs transition-colors"
-                              style={{ color: selectedModel === model ? '#76b900' : 'var(--text-secondary)' }}
-                              onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
-                              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                            >
-                              {model}
-                            </button>
-                          ))
-                    )}
-                  </div>
-                  <div className="p-2 text-center" style={{ borderTop: '1px solid var(--border-secondary)' }}>
-                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                      {models.length} models available
-                    </span>
-                  </div>
+                      {(() => {
+                        const search = modelSearch.toLowerCase()
+                        const filtered = modelCategories
+                          .map(cat => ({
+                            ...cat,
+                            models: cat.models.filter(m => m.toLowerCase().includes(search))
+                          }))
+                          .filter(cat => cat.models.length > 0)
+
+                        if (filtered.length === 0) {
+                          return <p className="text-xs text-center py-4" style={{ color: 'var(--text-muted)' }}>No models found</p>
+                        }
+
+                        const totalUnique = new Set(
+                          filtered.flatMap(cat => cat.models)
+                        ).size
+
+                        return (
+                          <>
+                            {filtered.map(cat => (
+                              <div key={cat.name}>
+                                <div
+                                  className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide sticky top-0"
+                                  style={{ color: 'var(--text-muted)', backgroundColor: 'var(--bg-dropdown)' }}
+                                >
+                                  {cat.name}
+                                </div>
+                                {cat.models.map(model => (
+                                  <button
+                                    key={model}
+                                    onClick={() => {
+                                      setSelectedModel(model)
+                                      setModelDropdownOpen(false)
+                                      setModelSearch('')
+                                    }}
+                                    className="w-full text-left px-3 py-2.5 text-xs transition-colors flex items-center gap-2"
+                                    style={{ color: selectedModel === model ? '#0d9488' : 'var(--text-secondary)' }}
+                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
+                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                                  >
+                                    {model === recommendedModel && (
+                                      <span
+                                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded shrink-0"
+                                        style={{ backgroundColor: 'rgba(13, 148, 136, 0.15)', color: '#0d9488' }}
+                                      >
+                                        RECOMMENDED
+                                      </span>
+                                    )}
+                                    <span className="truncate">{model}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ))}
+                          </>
+                        )
+                      })()}
+                    </div>
+                    <div className="p-2 text-center" style={{ borderTop: '1px solid var(--border-secondary)' }}>
+                      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                        {(() => {
+                          const all = modelCategories.flatMap(c => c.models)
+                          return new Set(all).size
+                        })()} models available
+                      </span>
+                    </div>
                   </div>
                 </>
               )}
@@ -329,12 +406,14 @@ export default function App() {
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center px-4">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ backgroundColor: 'rgba(118, 185, 0, 0.1)' }}>
-                <Bot size={32} className="text-[#76b900]" />
-              </div>
-              <h2 className="text-2xl font-semibold mb-2">NvidiaGPT</h2>
+              <img
+                src={theme === 'dark' ? '/logo_dark.png' : '/logo_white.png'}
+                alt="ntoricGPT"
+                className="h-28 w-auto mb-4"
+              />
+              <h2 className="text-2xl font-semibold mb-2">ntoricGPT</h2>
               <p className="text-sm max-w-md" style={{ color: 'var(--text-muted)' }}>
-                Start a conversation by typing a message below. Powered by NVIDIA API with Llama 4.
+                Start a conversation by typing a message below. Powered by ntoric API.
               </p>
             </div>
           ) : (
@@ -349,7 +428,60 @@ export default function App() {
 
         {/* Input */}
         <div className="p-4" style={{ borderTop: '1px solid var(--border-primary)' }}>
-          <div className="max-w-3xl mx-auto relative">
+          <div className="max-w-3xl mx-auto">
+            {/* Purpose selector */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>Purpose:</span>
+              <div className="relative">
+                <button
+                  onClick={() => setPurposeDropdownOpen(!purposeDropdownOpen)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-colors text-[11px] font-medium"
+                  style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--bg-tertiary)'}
+                >
+                  <Zap size={11} style={{ color: '#0d9488' }} />
+                  <span>{selectedPurpose || 'Select purpose'}</span>
+                </button>
+                {purposeDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setPurposeDropdownOpen(false)}
+                    />
+                    <div className="absolute left-0 bottom-full mb-1 w-72 rounded-lg shadow-xl z-20" style={{ backgroundColor: 'var(--bg-dropdown)', border: '1px solid var(--border-secondary)' }}>
+                      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                        Recommended free models
+                      </div>
+                      <div className="max-h-56 overflow-y-auto">
+                        {PURPOSE_RECOMMENDATIONS.map(rec => (
+                          <button
+                            key={rec.purpose}
+                            onClick={() => handleSelectPurpose(rec.purpose)}
+                            className="w-full text-left px-3 py-2.5 text-xs transition-colors flex items-center gap-2"
+                            style={{ color: selectedPurpose === rec.purpose ? '#0d9488' : 'var(--text-secondary)' }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                          >
+                            <Zap size={11} style={{ color: selectedPurpose === rec.purpose ? '#0d9488' : 'var(--text-muted)' }} />
+                            <div className="flex flex-col">
+                              <span className="font-medium">{rec.purpose}</span>
+                              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{rec.model}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              {selectedModel && (
+                <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  → {selectedModel}
+                </span>
+              )}
+            </div>
+            <div className="relative">
             <textarea
               ref={inputRef}
               value={input}
@@ -357,23 +489,35 @@ export default function App() {
               onKeyDown={handleKeyDown}
               placeholder="Send a message..."
               rows={1}
-              className="w-full rounded-2xl px-4 py-3 pr-12 resize-none outline-none focus:ring-1 focus:ring-[#76b900] text-sm"
+              className="w-full rounded-2xl px-4 py-3 pr-12 resize-none outline-none focus:ring-1 focus:ring-[#0d9488] text-sm"
               style={{ minHeight: '48px', maxHeight: '200px', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
               onInput={e => {
                 e.target.style.height = 'auto'
                 e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px'
               }}
             />
-            <button
-              onClick={handleSend}
-              disabled={!input.trim() || streaming}
-              className="absolute right-3 bottom-3 p-2 rounded-lg bg-[#76b900] hover:bg-[#85d100] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              <Send size={16} className="text-black" />
-            </button>
+            {streaming ? (
+              <button
+                onClick={handleStop}
+                className="absolute right-3 bottom-3 p-2 rounded-lg transition-colors"
+                style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}
+                title="Stop generating"
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="absolute right-3 bottom-3 p-2 rounded-lg bg-[#0d9488] hover:bg-[#14b8a6] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <Send size={16} className="text-black" />
+              </button>
+            )}
+            </div>
           </div>
           <p className="text-center text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-            NvidiaGPT can make mistakes. Check important info.
+            ntoricGPT can make mistakes. Check important info.
           </p>
         </div>
       </div>
@@ -428,9 +572,9 @@ function MessageBubble({ message, streaming, theme }) {
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0`}
-        style={{ backgroundColor: isUser ? 'var(--avatar-user)' : 'rgba(118, 185, 0, 0.1)' }}
+        style={{ backgroundColor: isUser ? 'var(--avatar-user)' : 'rgba(13, 148, 136, 0.1)' }}
       >
-        {isUser ? <User size={16} /> : <Bot size={16} className="text-[#76b900]" />}
+        {isUser ? <User size={16} /> : <img src="/logo_short.png" alt="" className="h-4 w-auto" />}
       </div>
       <div className={`flex-1 ${isUser ? 'text-right' : ''}`}>
         <div className={`${isUser ? 'inline-block' : 'block w-full'} text-left rounded-2xl px-4 py-3`}

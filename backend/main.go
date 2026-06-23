@@ -34,7 +34,7 @@ func main() {
 	nvidiaClient := nvidia.New(cfg.NvidiaAPIKey, cfg.NvidiaAPIURL, cfg.NvidiaModel)
 
 	// Create handler
-	h := handlers.New(database, redisCache, nvidiaClient, cfg.AvailableModels)
+	h := handlers.New(database, redisCache, nvidiaClient, cfg.ModelCategories)
 
 	// Routes
 	mux := http.NewServeMux()

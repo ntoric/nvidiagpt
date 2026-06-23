@@ -66,6 +66,7 @@
 
 html, body, #root {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -185,7 +186,7 @@ body {
 }
 
 .markdown-content a {
-  color: #76b900;
+  color: #0d9488;
   text-decoration: underline;
 }
 

@@ -4,7 +4,7 @@ export async function getModels() {
   const res = await fetch(`${API_BASE}/models`)
   if (!res.ok) throw new Error('Failed to fetch models')
   const data = await res.json()
-  return data.models || []
+  return data.categories || []
 }
 
 export async function listConversations() {
@@ -36,12 +36,13 @@ export async function deleteConversation(id) {
   if (!res.ok) throw new Error('Failed to delete conversation')
 }
 
-export async function sendMessageStream(conversationId, message, model, onToken, onDone, onError) {
+export async function sendMessageStream(conversationId, message, model, onToken, onDone, onError, signal) {
   try {
     const res = await fetch(`${API_BASE}/conversations/${conversationId}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, model }),
+      signal,
     })
 
     if (!res.ok) {
@@ -83,6 +84,10 @@ export async function sendMessageStream(conversationId, message, model, onToken,
     }
     onDone()
   } catch (err) {
+    if (err.name === 'AbortError') {
+      onDone()
+      return
+    }
     onError(err.message)
   }
 }

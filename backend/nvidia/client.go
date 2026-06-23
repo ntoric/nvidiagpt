@@ -3,6 +3,7 @@ package nvidia
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,54 +54,7 @@ func New(apiKey, url, model string) *Client {
 	}
 }
 
-type modelInfo struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	OwnedBy string `json:"owned_by"`
-}
-
-type modelsResponse struct {
-	Data []modelInfo `json:"data"`
-}
-
-func (c *Client) FetchModels() ([]string, error) {
-	modelsURL := strings.Replace(c.URL, "/chat/completions", "/models", 1)
-
-	req, err := http.NewRequest("GET", modelsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create models request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch models: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("models api error (status %d): %s", resp.StatusCode, string(raw))
-	}
-
-	var result modelsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode models response: %w", err)
-	}
-
-	var models []string
-	for _, m := range result.Data {
-		if m.ID != "" {
-			models = append(models, m.ID)
-		}
-	}
-
-	return models, nil
-}
-
-func (c *Client) StreamChat(messages []Message, model string, onToken func(content string)) error {
+func (c *Client) StreamChat(ctx context.Context, messages []Message, model string, onToken func(content string)) error {
 	if model == "" {
 		model = c.Model
 	}
@@ -120,7 +74,7 @@ func (c *Client) StreamChat(messages []Message, model string, onToken func(conte
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.URL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.URL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -144,6 +98,12 @@ func (c *Client) StreamChat(messages []Message, model string, onToken func(conte
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		line := scanner.Text()
 		if line == "" || !strings.HasPrefix(line, "data: ") {
 			continue
@@ -170,5 +130,8 @@ func (c *Client) StreamChat(messages []Message, model string, onToken func(conte
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return scanner.Err()
 }

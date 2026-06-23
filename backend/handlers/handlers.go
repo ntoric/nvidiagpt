@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -12,15 +13,20 @@ import (
 	"nvidiagpt/nvidia"
 )
 
-type Handler struct {
-	DB             *sql.DB
-	Redis          *cache.Redis
-	Nvidia         *nvidia.Client
-	AvailableModels []string
+type ModelCategory struct {
+	Name   string   `json:"name"`
+	Models []string `json:"models"`
 }
 
-func New(db *sql.DB, redis *cache.Redis, nvidiaClient *nvidia.Client, availableModels []string) *Handler {
-	return &Handler{DB: db, Redis: redis, Nvidia: nvidiaClient, AvailableModels: availableModels}
+type Handler struct {
+	DB              *sql.DB
+	Redis           *cache.Redis
+	Nvidia          *nvidia.Client
+	ModelCategories []ModelCategory
+}
+
+func New(db *sql.DB, redis *cache.Redis, nvidiaClient *nvidia.Client, modelCategories []ModelCategory) *Handler {
+	return &Handler{DB: db, Redis: redis, Nvidia: nvidiaClient, ModelCategories: modelCategories}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -31,35 +37,21 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Models(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	// Try to fetch models dynamically from NVIDIA API
-	apiModels, err := h.Nvidia.FetchModels()
-	if err == nil && len(apiModels) > 0 {
-		// Merge API models with hardcoded list (API models take priority, add any missing hardcoded ones)
-		seen := make(map[string]bool)
-		var merged []string
-		for _, m := range apiModels {
+	// Count total unique models
+	seen := make(map[string]bool)
+	total := 0
+	for _, cat := range h.ModelCategories {
+		for _, m := range cat.Models {
 			if !seen[m] {
 				seen[m] = true
-				merged = append(merged, m)
+				total++
 			}
 		}
-		for _, m := range h.AvailableModels {
-			if !seen[m] {
-				seen[m] = true
-				merged = append(merged, m)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"models": merged,
-			"source": "api",
-		})
-		return
 	}
 
-	// Fallback to hardcoded list
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"models": h.AvailableModels,
-		"source": "fallback",
+		"categories": h.ModelCategories,
+		"total":      total,
 	})
 }
 
@@ -212,7 +204,7 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 	var fullResponse strings.Builder
 	tokenCount := 0
 
-	err = h.Nvidia.StreamChat(nvidiaMsgs, body.Model, func(content string) {
+	err = h.Nvidia.StreamChat(r.Context(), nvidiaMsgs, body.Model, func(content string) {
 		fullResponse.WriteString(content)
 		tokenCount++
 
@@ -220,6 +212,16 @@ func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
 	})
+
+	if err != nil && err == context.Canceled {
+		// Client disconnected (stop button) — save partial response
+		assistantContent := fullResponse.String()
+		if assistantContent != "" {
+			_, _ = models.CreateMessage(h.DB, id, "assistant", assistantContent)
+		}
+		_ = models.UpdateConversationTimestamp(h.DB, id)
+		return
+	}
 
 	if err != nil {
 		errData, _ := json.Marshal(map[string]string{"error": err.Error()})
