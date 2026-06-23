@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nvidiagpt-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nvidiagpt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nvidiagpt}
+      POSTGRES_DB: nvidiagpt
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nvidiagpt"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: nvidiagpt-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: ${BACKEND_IMAGE:-nvidiagpt/backend:latest}
+    container_name: nvidiagpt-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: nvidiagpt
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-nvidiagpt}
+      DB_NAME: nvidiagpt
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GIN_MODE: release
+    ports:
+      - "8089:8089"
+    networks:
+      - internal
+      - web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+  web:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
